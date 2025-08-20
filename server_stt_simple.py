@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-실시간 한국어 STT 서버 (화자분리 포함, WSS)
+실시간 한국어 STT 서버 (화자분리 포함, WSS) - STT 전용
 - Whisper 기반 ASR + 화자분리
 - 화자 등록 프로세스 포함
 - WebSocket Secure 서버: wss://0.0.0.0:8085
@@ -8,13 +8,11 @@
 
 import asyncio
 import websockets
-import wave
 import os
 from datetime import datetime
 import torch
 import json
 import re
-import aiohttp
 import ssl
 import numpy as np
 
@@ -25,11 +23,11 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 SAMPLE_RATE = 16000
 HOST = "0.0.0.0"
-PORT = 8085
+PORT = 8088
 
 model_path = "/home/2020112534/safe_hi/model/my_whisper"
 
-# TLS 설정
+# TLS 설정 - 로컬 key 디렉토리의 인증서 사용
 CERT_FILE = "./key/fullchain.pem"
 KEY_FILE = "./key/privkey.pem"
 
@@ -41,10 +39,8 @@ ssl_ctx.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
 clients = {}
 
 class SpeakerSession:
-    def __init__(self, client_id, reportid, email):
+    def __init__(self, client_id):
         self.client_id = client_id
-        self.reportid = reportid
-        self.email = email
         self.stt_processor = None
         self.registration_mode = True
         self.current_speaker_registering = None
@@ -81,35 +77,20 @@ async def handle_client(websocket, path=None):
     session = None
 
     try:
-        # 1) 메타데이터 수신
-        init_msg = await websocket.recv()
-        metadata = json.loads(init_msg)
-        reportid = metadata.get("reportid")
-        email = metadata.get("email")
-        print(f"[{client_id}] 연결 메타데이터 수신: reportid={reportid}, email={email}")
+        # 1) 초기 연결 메시지
+        await websocket.send(json.dumps({
+            "type": "connected",
+            "message": f"클라이언트 {client_id} 연결됨"
+        }))
         
         # 세션 초기화
-        session = SpeakerSession(client_id, reportid, email)
+        session = SpeakerSession(client_id)
         session.initialize_stt()
         
         await websocket.send(json.dumps({
             "type": "model_loaded",
             "message": "STT AI 모델 로드 완료! 화자 등록을 시작하세요."
         }))
-        
-        # 파일 경로 설정
-        base_dir = "./new_data"
-        upload_dir = os.path.join(base_dir, "upload")
-        os.makedirs(upload_dir, exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        txt_file = os.path.abspath(os.path.join(upload_dir, f"transcript_{client_id}_{timestamp}.txt"))
-        
-        # DB 경로 업데이트
-        await update_stt_path(reportid, email, txt_file, client_id)
-        
-        # 텍스트 파일 준비
-        tf = open(txt_file, "a", encoding="utf-8")
         
         async for message in websocket:
             try:
@@ -119,22 +100,17 @@ async def handle_client(websocket, path=None):
                     await handle_control_message(websocket, session, data)
                 else:
                     # 바이너리 오디오 데이터
-                    await handle_audio_data(websocket, session, message, tf)
+                    await handle_audio_data(websocket, session, message)
                     
             except json.JSONDecodeError:
                 # 바이너리 오디오 데이터로 처리
-                await handle_audio_data(websocket, session, message, tf)
+                await handle_audio_data(websocket, session, message)
         
     except websockets.exceptions.ConnectionClosed:
         print(f"클라이언트 {client_id} 접속 종료됨.")
     except Exception as e:
         print(f"[{client_id}] 오류 발생: {e}")
     finally:
-        try:
-            if 'tf' in locals():
-                tf.close()
-        except:
-            pass
         await unregister_client(client_id)
 
 async def handle_control_message(websocket, session, data):
@@ -173,7 +149,7 @@ async def handle_control_message(websocket, session, data):
             "message": "실시간 전사를 시작합니다."
         }))
 
-async def handle_audio_data(websocket, session, audio_chunk, tf):
+async def handle_audio_data(websocket, session, audio_chunk):
     if not session.stt_processor:
         return
     
@@ -207,10 +183,6 @@ async def handle_audio_data(websocket, session, audio_chunk, tf):
             if cleaned_text.strip():
                 print(f"[SEND to {session.client_id}] Speaker {speaker_id}: {cleaned_text}")
                 
-                # 파일에 저장
-                tf.write(f"화자{speaker_id}: {cleaned_text}\n")
-                tf.flush()
-                
                 # 클라이언트로 전송
                 await websocket.send(json.dumps({
                     "type": "transcription",
@@ -235,55 +207,47 @@ async def register_speaker_samples(session, speaker_id):
     # STT 프로세서에 화자 등록
     if len(audio_np) > SAMPLE_RATE * 0.5:  # 최소 0.5초 이상
         embedding = session.stt_processor.extract_embedding(audio_np)
-        session.stt_processor.speaker_embeddings.append((embedding, speaker_id))
-        session.stt_processor.initial_enroll_count += 1
-        print(f"화자 {speaker_id} 등록 완료 (샘플 길이: {len(audio_np)/SAMPLE_RATE:.2f}초)")
-
-async def update_stt_path(reportid, email, txt_file, client_id):
-    """STT 경로를 DB에 업데이트"""
-    stt_update_api = "https://safe-hi.xyz/db/update_stt_path"
-    update_payload = {
-        "reportid": reportid,
-        "email": email,
-        "newPath": txt_file
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.patch(stt_update_api, json=update_payload) as resp:
-                resp_json = await resp.json()
-                print(f"[{client_id}] STT 업데이트 응답: {resp.status} {resp_json}")
-    except Exception as e:
-        print(f"[{client_id}] STT 업데이트 요청 실패: {e}")
-
-async def start_summary(txt_file, reportid, email, client_id):
-    """AI 요약 시작"""
-    print("txt_file in server: ", txt_file)
-    ai_summary_api = "https://safe-hi.xyz/db/update_visit_category"
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(ai_summary_api, json={
-                "reportid": reportid,
-                "email": email,
-                "txt_file": txt_file
-            }) as resp:
-                resp_json = await resp.json()
-                print(f"[{client_id}] AI 요약 응답: {resp.status} {resp_json}")
-    except Exception as e:
-        print(f"[{client_id}] AI 요약 요청 실패: {e}")
+        if embedding is not None:
+            session.stt_processor.speaker_embeddings.append((embedding, speaker_id))
+            session.stt_processor.initial_enroll_count += 1
+            print(f"화자 {speaker_id} 등록 완료 (샘플 길이: {len(audio_np)/SAMPLE_RATE:.2f}초)")
 
 async def main():
-    async with websockets.serve(
-        handle_client,
-        HOST,
-        PORT,
-        ssl=ssl_ctx,
-        max_size=None,
-        compression=None
-    ):
-        print(f"서버가 wss://{HOST}:{PORT} 대기중...")
-        await asyncio.Future()
+    # SSL 인증서 파일 확인
+    if not os.path.exists(CERT_FILE):
+        print(f"❌ SSL 인증서를 찾을 수 없습니다: {CERT_FILE}")
+        return
+    if not os.path.exists(KEY_FILE):
+        print(f"❌ SSL 키 파일을 찾을 수 없습니다: {KEY_FILE}")
+        return
+    
+    print(f"✅ SSL 인증서 확인됨: {CERT_FILE}")
+    print(f"✅ SSL 키 파일 확인됨: {KEY_FILE}")
+    
+    try:
+        ssl_ctx.load_cert_chain(certfile=CERT_FILE, keyfile=KEY_FILE)
+        print("✅ SSL 컨텍스트 로드 완료")
+    except Exception as e:
+        print(f"❌ SSL 설정 오류: {e}")
+        return
+    
+    try:
+        async with websockets.serve(
+            handle_client,
+            HOST,
+            PORT,
+            ssl=ssl_ctx,
+            max_size=None,
+            compression=None
+        ):
+            print(f"🚀 STT 서버가 wss://{HOST}:{PORT} 대기중...")
+            print(f"🌐 외부 접속: wss://safe-hi.xyz:{PORT}")
+            print("Ctrl+C로 종료")
+            await asyncio.Future()
+    except Exception as e:
+        print(f"❌ 서버 시작 오류: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     asyncio.run(main())
