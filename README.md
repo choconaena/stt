@@ -80,17 +80,23 @@ mkdir -p key/
 ```bash
 # 터미널 1: STT 서버 실행
 python server_stt_simple.py
+python server_stt_improved.py
 
 # 터미널 2: 웹서버 실행
 python https_server.py
 
+
 # 터미널 3: SSH 터널링 (원격 접속용)
 ssh -N -R 0.0.0.0:8088:127.0.0.1:8088 -R 0.0.0.0:8444:127.0.0.1:8444 root@your-domain.com
+
+ssh -N -R 0.0.0.0:8088:127.0.0.1:8088 -R 0.0.0.0:8444:127.0.0.1:8444 root@211.188.56.255
 ```
 
 ### 5. 브라우저 접속
 ```
 https://your-domain.com:8444/speaker_stt_frontend.html
+
+https://safe-hi.xyz:8444/speaker_stt_frontend.html
 ```
 
 ## 📖 사용 방법
