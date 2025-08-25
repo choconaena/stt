@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 화자분리 STT</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .status {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            background: #dc3545;
+        }
+
+        .status-indicator.connected {
+            background: #28a745;
+        }
+
+        .setup-section {
+            padding: 30px;
+            text-align: center;
+        }
+
+        .speaker-setup {
+            display: flex;
+            justify-content: space-around;
+            margin: 30px 0;
+            gap: 20px;
+        }
+
+        .speaker-card {
+            flex: 1;
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            border: 2px solid #e9ecef;
+            transition: all 0.3s ease;
+        }
+
+        .speaker-card.active {
+            border-color: #007bff;
+            background: #e3f2fd;
+        }
+
+        .speaker-card.completed {
+            border-color: #28a745;
+            background: #d4edda;
+        }
+
+        .speaker-icon {
+            width: 80px;
+            height: 80px;
+            background: #007bff;
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        .speaker-card.completed .speaker-icon {
+            background: #28a745;
+        }
+
+        .btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            margin: 10px;
+            min-width: 150px;
+        }
+
+        .btn:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,123,255,0.4);
+        }
+
+        .btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn.success {
+            background: #28a745;
+        }
+
+        .btn.success:hover {
+            background: #1e7e34;
+        }
+
+        .btn.danger {
+            background: #dc3545;
+        }
+
+        .btn.danger:hover {
+            background: #c82333;
+        }
+
+        .chat-container {
+            height: 500px;
+            display: flex;
+            flex-direction: column;
+            background: #f8f9fa;
+            margin: 20px;
+            border-radius: 15px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .chat-container.active {
+            display: flex;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 70%;
+            padding: 15px 20px;
+            border-radius: 20px;
+            position: relative;
+            word-wrap: break-word;
+            animation: slideIn 0.3s ease;
+        }
+
+        .message.speaker-0 {
+            align-self: flex-end;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+
+        .message.speaker-1 {
+            align-self: flex-start;
+            background: #e9ecef;
+            color: #333;
+            border-bottom-left-radius: 5px;
+        }
+
+        .message-info {
+            font-size: 0.8em;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .message-text {
+            font-size: 1.1em;
+            line-height: 1.4;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .controls {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+            text-align: center;
+        }
+
+        .recording-indicator {
+            display: none;
+            color: #dc3545;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .recording-indicator.active {
+            display: block;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #e9ecef;
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #007bff;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .speaker-label {
+            font-size: 1.2em;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .instructions {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎤 실시간 화자분리 STT</h1>
+            <p>두 명의 화자를 구분하여 실시간으로 음성을 텍스트로 변환합니다</p>
+        </div>
+
+        <div class="status">
+            <span class="status-indicator" id="statusIndicator"></span>
+            <span id="statusText">서버 연결 중...</span>
+        </div>
+
+        <div class="setup-section" id="setupSection">
+            <div class="instructions">
+                <strong>📋 사용 방법:</strong><br>
+                1. 먼저 화자 1번과 2번의 목소리를 각각 등록해주세요 (3-5초간 말씀)<br>
+                2. 두 화자 등록이 완료되면 실시간 대화 전사를 시작할 수 있습니다<br>
+                3. 대화 내용은 실시간으로 화면에 표시되며 자동으로 저장됩니다
+            </div>
+
+            <div class="speaker-setup">
+                <div class="speaker-card" id="speaker0Card">
+                    <div class="speaker-icon">1</div>
+                    <div class="speaker-label">화자 1번</div>
+                    <button class="btn" id="registerSpeaker0" onclick="startSpeakerRegistration(0)">
+                        목소리 등록하기
+                    </button>
+                    <div class="recording-indicator" id="recording0">🔴 녹음 중... (3-5초간 말씀해주세요)</div>
+                </div>
+
+                <div class="speaker-card" id="speaker1Card">
+                    <div class="speaker-icon">2</div>
+                    <div class="speaker-label">화자 2번</div>
+                    <button class="btn" id="registerSpeaker1" onclick="startSpeakerRegistration(1)">
+                        목소리 등록하기
+                    </button>
+                    <div class="recording-indicator" id="recording1">🔴 녹음 중... (3-5초간 말씀해주세요)</div>
+                </div>
+            </div>
+
+            <button class="btn success" id="startTranscription" onclick="startTranscription()" disabled>
+                🚀 대화 전사 시작하기
+            </button>
+        </div>
+
+        <div class="chat-container" id="chatContainer">
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="controls">
+                <button class="btn danger" onclick="stopTranscription()">
+                    ⏹️ 전사 중단
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class SpeakerSTT {
+            constructor() {
+                this.ws = null;
+                this.audioContext = null;
+                this.mediaStream = null;
+                this.processor = null;
+                this.isRecording = false;
+                this.speakerRegistered = [false, false];
+                this.currentRegistering = null;
+                this.transcriptionActive = false;
+                
+                this.connect();
+            }
+
+            async connect() {
+                try {
+                    // WSS 연결 (실제 도메인에 맞게 수정)
+                    this.ws = new WebSocket('wss://safe-hi.xyz:8088');
+                    
+                    this.ws.onopen = () => {
+                        console.log('WebSocket 연결됨');
+                        this.updateStatus('connected', '서버 연결됨');
+                        
+                        // 메타데이터 전송
+                        this.ws.send(JSON.stringify({
+                            reportid: 'test_report_' + Date.now(),
+                            email: 'test@example.com'
+                        }));
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            this.handleServerMessage(data);
+                        } catch (e) {
+                            console.error('메시지 파싱 오류:', e);
+                        }
+                    };
+
+                    this.ws.onclose = () => {
+                        this.updateStatus('disconnected', '서버 연결 끊어짐');
+                        console.log('WebSocket 연결 끊어짐');
+                    };
+
+                    this.ws.onerror = (error) => {
+                        console.error('WebSocket 오류:', error);
+                        this.updateStatus('error', '연결 오류');
+                    };
+
+                } catch (error) {
+                    console.error('연결 실패:', error);
+                    this.updateStatus('error', '연결 실패');
+                }
+            }
+
+            updateStatus(status, text) {
+                const indicator = document.getElementById('statusIndicator');
+                const statusText = document.getElementById('statusText');
+                
+                indicator.className = 'status-indicator';
+                if (status === 'connected') {
+                    indicator.classList.add('connected');
+                }
+                
+                statusText.textContent = text;
+            }
+
+            handleServerMessage(data) {
+                switch (data.type) {
+                    case 'model_loaded':
+                        this.updateStatus('connected', data.message);
+                        break;
+                    
+                    case 'speaker_registration_started':
+                        this.showRecordingIndicator(data.speaker_id);
+                        break;
+                    
+                    case 'speaker_registration_completed':
+                        this.completeeSpeakerRegistration(data.speaker_id);
+                        break;
+                    
+                    case 'transcription_started':
+                        this.showChatInterface();
+                        break;
+                    
+                    case 'transcription':
+                        this.addMessage(data.speaker_id, data.text, data.timestamp);
+                        break;
+                }
+            }
+
+            async setupAudio() {
+                try {
+                    this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        }
+                    });
+
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 16000
+                    });
+
+                    const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+                    this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+
+                    this.processor.onaudioprocess = (event) => {
+                        if (this.isRecording && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                            const inputBuffer = event.inputBuffer.getChannelData(0);
+                            const pcmData = this.convertToPCM16(inputBuffer);
+                            this.ws.send(pcmData);
+                        }
+                    };
+
+                    source.connect(this.processor);
+                    this.processor.connect(this.audioContext.destination);
+
+                    return true;
+                } catch (error) {
+                    console.error('오디오 설정 실패:', error);
+                    alert('마이크 접근 권한이 필요합니다.');
+                    return false;
+                }
+            }
+
+            convertToPCM16(float32Array) {
+                const buffer = new ArrayBuffer(float32Array.length * 2);
+                const view = new DataView(buffer);
+                let offset = 0;
+                
+                for (let i = 0; i < float32Array.length; i++, offset += 2) {
+                    let s = Math.max(-1, Math.min(1, float32Array[i]));
+                    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                }
+                
+                return buffer;
+            }
+
+            async startRecording() {
+                if (!this.audioContext) {
+                    const setupSuccess = await this.setupAudio();
+                    if (!setupSuccess) return false;
+                }
+                
+                if (this.audioContext.state === 'suspended') {
+                    await this.audioContext.resume();
+                }
+                
+                this.isRecording = true;
+                return true;
+            }
+
+            stopRecording() {
+                this.isRecording = false;
+            }
+
+            showRecordingIndicator(speakerId) {
+                document.getElementById(`recording${speakerId}`).classList.add('active');
+                document.getElementById(`registerSpeaker${speakerId}`).disabled = true;
+            }
+
+            hideRecordingIndicator(speakerId) {
+                document.getElementById(`recording${speakerId}`).classList.remove('active');
+                document.getElementById(`registerSpeaker${speakerId}`).disabled = false;
+            }
+
+            completeeSpeakerRegistration(speakerId) {
+                this.hideRecordingIndicator(speakerId);
+                this.speakerRegistered[speakerId] = true;
+                
+                const card = document.getElementById(`speaker${speakerId}Card`);
+                card.classList.add('completed');
+                
+                const button = document.getElementById(`registerSpeaker${speakerId}`);
+                button.textContent = '✅ 등록 완료';
+                button.disabled = true;
+                
+                this.currentRegistering = null;
+                
+                // 모든 화자 등록이 완료되었는지 확인
+                if (this.speakerRegistered[0] && this.speakerRegistered[1]) {
+                    document.getElementById('startTranscription').disabled = false;
+                }
+            }
+
+            showChatInterface() {
+                document.getElementById('setupSection').style.display = 'none';
+                document.getElementById('chatContainer').classList.add('active');
+                this.transcriptionActive = true;
+            }
+
+            addMessage(speakerId, text, timestamp) {
+                const messagesContainer = document.getElementById('chatMessages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message speaker-${speakerId}`;
+                
+                const time = new Date(timestamp).toLocaleTimeString();
+                const speakerName = speakerId === 0 ? '화자 1' : '화자 2';
+                
+                messageDiv.innerHTML = `
+                    <div class="message-info">${speakerName} • ${time}</div>
+                    <div class="message-text">${text}</div>
+                `;
+                
+                messagesContainer.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }
+
+        // 전역 변수
+        let sttClient = null;
+
+        // 페이지 로드 시 STT 클라이언트 초기화
+        window.addEventListener('load', () => {
+            sttClient = new SpeakerSTT();
+        });
+
+        // 화자 등록 시작
+        async function startSpeakerRegistration(speakerId) {
+            if (!sttClient || !sttClient.ws || sttClient.ws.readyState !== WebSocket.OPEN) {
+                alert('서버에 연결되지 않았습니다.');
+                return;
+            }
+
+            if (sttClient.currentRegistering !== null) {
+                alert('이미 다른 화자를 등록 중입니다.');
+                return;
+            }
+
+            const recordingStarted = await sttClient.startRecording();
+            if (!recordingStarted) {
+                return;
+            }
+
+            sttClient.currentRegistering = speakerId;
+            
+            // 서버에 화자 등록 시작 알림
+            sttClient.ws.send(JSON.stringify({
+                type: 'start_speaker_registration',
+                speaker_id: speakerId
+            }));
+
+            // 5초 후 자동으로 등록 완료
+            setTimeout(() => {
+                if (sttClient.currentRegistering === speakerId) {
+                    completeSpeakerRegistration(speakerId);
+                }
+            }, 5000);
+        }
+
+        // 화자 등록 완료
+        function completeSpeakerRegistration(speakerId) {
+            if (!sttClient || !sttClient.ws || sttClient.ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            if (sttClient.currentRegistering === speakerId) {
+                sttClient.stopRecording();
+                
+                // 서버에 화자 등록 완료 알림
+                sttClient.ws.send(JSON.stringify({
+                    type: 'complete_speaker_registration',
+                    speaker_id: speakerId
+                }));
+            }
+        }
+
+        // 실시간 전사 시작
+        async function startTranscription() {
+            if (!sttClient || !sttClient.ws || sttClient.ws.readyState !== WebSocket.OPEN) {
+                alert('서버에 연결되지 않았습니다.');
+                return;
+            }
+
+            if (!sttClient.speakerRegistered[0] || !sttClient.speakerRegistered[1]) {
+                alert('모든 화자의 목소리를 먼저 등록해주세요.');
+                return;
+            }
+
+            const recordingStarted = await sttClient.startRecording();
+            if (!recordingStarted) {
+                return;
+            }
+
+            // 서버에 전사 시작 알림
+            sttClient.ws.send(JSON.stringify({
+                type: 'start_transcription'
+            }));
+        }
+
+        // 전사 중단
+        function stopTranscription() {
+            if (sttClient) {
+                sttClient.stopRecording();
+                sttClient.transcriptionActive = false;
+                
+                // UI를 초기 상태로 되돌리기
+                document.getElementById('setupSection').style.display = 'block';
+                document.getElementById('chatContainer').classList.remove('active');
+                
+                // 메시지 초기화
+                document.getElementById('chatMessages').innerHTML = '';
+                
+                // 버튼 상태 초기화
+                sttClient.speakerRegistered = [false, false];
+                document.getElementById('startTranscription').disabled = true;
+                
+                // 화자 카드 초기화
+                for (let i = 0; i < 2; i++) {
+                    const card = document.getElementById(`speaker${i}Card`);
+                    card.classList.remove('completed', 'active');
+                    
+                    const button = document.getElementById(`registerSpeaker${i}`);
+                    button.textContent = '목소리 등록하기';
+                    button.disabled = false;
+                    
+                    sttClient.hideRecordingIndicator(i);
+                }
+                
+                if (sttClient.ws && sttClient.ws.readyState === WebSocket.OPEN) {
+                    sttClient.ws.close();
+                }
+                
+                // 새로운 연결 시작
+                setTimeout(() => {
+                    sttClient = new SpeakerSTT();
+                }, 1000);
+            }
+        }
+
+        // 페이지 언로드 시 정리
+        window.addEventListener('beforeunload', () => {
+            if (sttClient) {
+                sttClient.stopRecording();
+                if (sttClient.ws) {
+                    sttClient.ws.close();
+                }
+                if (sttClient.audioContext) {
+                    sttClient.audioContext.close();
+                }
+                if (sttClient.mediaStream) {
+                    sttClient.mediaStream.getTracks().forEach(track => track.stop());
+                }
+            }
+        });
+
+        // 키보드 단축키
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && sttClient && sttClient.transcriptionActive) {
+                stopTranscription();
+            }
+        });
+    </script>
+</body>
+</html>
